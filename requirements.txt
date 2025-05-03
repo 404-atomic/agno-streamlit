@@ -1,0 +1,11 @@
+streamlit
+agno
+openai
+python-dotenv
+streamlit-chat
+google-genai
+anthropic
+openai
+googlesearch-python
+sqlalchemy
+duckduckgo-search

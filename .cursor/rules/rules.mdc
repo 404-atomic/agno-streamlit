@@ -1,0 +1,15 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+When writting file, please follow the python file structure best practice 
+
+├── app/
+│   ├── __init__.py         # marks as package
+│   ├── main.py             # main entry point (Streamlit/FastAPI/etc.)
+│   ├── config.py           # app configs, env settings
+│   ├── models.py           # AI models, LLM wrappers, etc.
+│   ├── memory.py           # memory or session management
+│   ├── ui.py               # frontend (Streamlit, NiceGUI, Gradio components)
+│   └── utils.py            # helper functions, small utilities
