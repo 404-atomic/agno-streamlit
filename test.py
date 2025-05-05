@@ -1,49 +1,26 @@
-import streamlit as st
+# install lancedb - `pip install lancedb`
+import asyncio
+
 from agno.agent import Agent
-from agno.tools.duckduckgo import DuckDuckGoTools
+from agno.knowledge.pdf_url import PDFUrlKnowledgeBase
+from agno.vectordb.lancedb import LanceDb
 
-# Initialize agent
-agent = Agent(tools=[DuckDuckGoTools()], show_tool_calls=True, markdown=True, stream=True)
+# Initialize LanceDB
+vector_db = LanceDb(
+    table_name="recipes",
+    uri="tmp/lancedb",  # You can change this path to store data elsewhere
+)
 
-# App title
-st.title("France News Agent 🗞️")
+# Create knowledge base
+knowledge_base = PDFUrlKnowledgeBase(
+    urls=["https://agno-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
+    vector_db=vector_db,
+)
+agent = Agent(knowledge=knowledge_base, show_tool_calls=True, debug_mode=True)
 
-# User input
-query = st.text_input("Ask me something about France:", value="Whats happening in France?")
+if __name__ == "__main__":
+    # Load knowledge base asynchronously
+    asyncio.run(knowledge_base.aload(recreate=False))  # Comment out after first run
 
-if st.button("Ask"):
-    with st.status("Running agent...", expanded=True) as status:
-        # Stream the agent response
-        message_placeholder = st.empty()
-        full_response = ""
-        last_response = None
-
-        for chunk in agent.run(query):
-            if hasattr(chunk, "content") and chunk.content:
-                full_response += chunk.content
-                message_placeholder.markdown(full_response)
-            last_response = chunk  # Keep the last chunk for metadata
-
-        status.update(label="Tool calls complete", state="running")
-
-        # Extract tool calls from last_response
-        tool_calls = []
-        if last_response and hasattr(last_response, "messages"):
-            for msg in last_response.messages:
-                if msg.role == "assistant" and msg.tool_calls:
-                    tool_calls.extend(msg.tool_calls)
-
-        if tool_calls:
-            st.subheader("🔧 Tool Calls")
-            for tool_call in tool_calls:
-                tool_name = tool_call.get('function', {}).get('name', 'Unknown Tool')
-                args = tool_call.get('function', {}).get('arguments', '{}')
-                st.markdown(f"- **{tool_name}** → `{args}`")
-        else:
-            st.markdown("_No tool calls found._")
-
-        status.update(label="Response ready!", state="complete")
-
-    # Final response summary
-    st.subheader("💬 Final Agent Response")
-    st.markdown(full_response)
+    # Create and use the agent asynchronously
+    asyncio.run(agent.aprint_response("How to make Tom Kha Gai", markdown=True))

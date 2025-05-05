@@ -4,6 +4,11 @@ from app.prompts import SEQUENTIAL_PROMPTS, EXAMPLE_DESCRIPTIONS, EXAMPLE_INSTRU
 import json # For pretty printing debug info
 from agno.memory.v2.memory import Memory # Import Memory for type hint
 from agno.storage.sqlite import SqliteStorage # Import Storage
+from agno.vectordb.lancedb import LanceDb # Import LanceDb for type hint
+import re # Import regex module
+import os # Import os module
+import lancedb # Import base lancedb library
+import traceback # For error reporting
 
 # --- Constants ---
 # The list is now defined in app/prompts.py
@@ -22,8 +27,27 @@ def display_chat_history():
     
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            # Display metadata as badges if it exists
+            content = message["content"]
+            if message["role"] == "assistant":
+                # Check for image URLs in the content
+                image_urls = re.findall(r'!\[.*?\]\((.*?)\.(png|jpg|jpeg|gif|bmp|svg)\)', content, re.IGNORECASE)
+                
+                if image_urls:
+                    text_parts = re.split(r'!\[.*?\]\(.*?\.(?:png|jpg|jpeg|gif|bmp|svg)\)', content, flags=re.IGNORECASE)
+                    url_index = 0
+                    for i, part in enumerate(text_parts):
+                        if part: # Display text part if it exists
+                            st.markdown(part)
+                        if i < len(image_urls):
+                            full_url = f"{image_urls[url_index][0]}.{image_urls[url_index][1]}"
+                            st.image(full_url, width=500) # Display image with width constraint
+                            url_index += 1
+                else:
+                    st.markdown(content) # Display as markdown if no image found
+            else:
+                st.markdown(content) # Display user message as markdown
+            
+            # Display metadata as badges if it exists for assistant
             if message["role"] == "assistant" and "metadata" in message:
                 metadata = message["metadata"]
                 badge_md_parts = [] # List to hold markdown badge strings
@@ -45,7 +69,9 @@ def display_chat_history():
                 if "tool_calls" in metadata and metadata["tool_calls"]:
                     tool_names = [tool.get('function', {}).get('name', 'Unknown') for tool in metadata["tool_calls"]]
                     if tool_names:
-                         badge_md_parts.append(f":blue-badge[Tools: {', '.join(tool_names)}]") # Changed color for tools
+                         # Deduplicate tool names before displaying them
+                         unique_tool_names = list(set(tool_names))
+                         badge_md_parts.append(f":red-badge[{', '.join(unique_tool_names)}]") # Changed color for tools
 
                 if badge_md_parts:
                     st.markdown(" " + " ".join(badge_md_parts)) # Join with spaces
@@ -67,8 +93,6 @@ def handle_agent_response(agent: Agent, prompt: str, user_id: str, session_id: s
         "load_history": getattr(agent, 'add_history_to_messages', False),
         "tool_calls": [], # Will be populated with tool call data if tools are used
     }
-    if not current_user_id: st.warning("User ID is not set...", icon="⚠️")
-    if not current_session_id: st.warning("Session ID is not set...", icon="⚠️")
 
     # --- Stream Processing --- 
     with st.chat_message("assistant"):
@@ -91,7 +115,16 @@ def handle_agent_response(agent: Agent, prompt: str, user_id: str, session_id: s
                 full_response_content = internal_error_message
             else:
                 # --- Original stream processing loop ---
+                has_captured_all_tool_calls = False  # Flag to track if we've already captured all tools
+                
+                # Storage for saving complete response (will be used to extract tools at the end)
+                complete_response = None
+                
                 for chunk in response_stream:
+                    # Save the complete response once available (last chunk should have everything)
+                    if hasattr(chunk, '__dict__') and 'content' in chunk.__dict__:
+                        complete_response = chunk
+
                     # Handle different types of chunks
                     if chunk is None:
                         # Skip None chunks
@@ -117,7 +150,18 @@ def handle_agent_response(agent: Agent, prompt: str, user_id: str, session_id: s
                                     metadata["tool_calls"].extend(msg.tool_calls)
                         # Check if directly on chunk object
                         elif hasattr(chunk, 'tool_calls') and chunk.tool_calls:
-                             metadata["tool_calls"].extend(chunk.tool_calls)
+                            metadata["tool_calls"].extend(chunk.tool_calls)
+                        # Check if tools field exists (Agno's actual field name for tool calls)
+                        elif hasattr(chunk, 'tools') and chunk.tools:
+                            # Convert tools to the expected tool_calls format (function.name)
+                            for tool in chunk.tools:
+                                if isinstance(tool, dict) and 'tool_name' in tool:
+                                    metadata["tool_calls"].append({"function": {"name": tool['tool_name']}})
+                                elif hasattr(tool, 'tool_name'):
+                                    metadata["tool_calls"].append({"function": {"name": tool.tool_name}})
+                        # Try to access tool_calls through a run property if it exists
+                        elif hasattr(chunk, 'run') and hasattr(chunk.run, 'tool_calls') and chunk.run.tool_calls:
+                            metadata["tool_calls"].extend(chunk.run.tool_calls)
 
                     elif isinstance(chunk, dict) and 'content' in chunk:
                         # Handle dictionary chunks with content
@@ -132,12 +176,50 @@ def handle_agent_response(agent: Agent, prompt: str, user_id: str, session_id: s
                                     metadata["tool_calls"].extend(msg['tool_calls'])
                         # Check if directly in chunk dict
                         elif 'tool_calls' in chunk and chunk['tool_calls']:
-                             metadata["tool_calls"].extend(chunk['tool_calls'])
+                            metadata["tool_calls"].extend(chunk['tool_calls'])
+                        # Check if tools field exists (Agno's actual field name for tool calls)
+                        elif 'tools' in chunk and chunk['tools']:
+                            # Convert tools to the expected tool_calls format (function.name)
+                            for tool in chunk['tools']:
+                                if isinstance(tool, dict) and 'tool_name' in tool:
+                                    metadata["tool_calls"].append({"function": {"name": tool['tool_name']}})
+                        # Try run property if present
+                        elif 'run' in chunk and 'tool_calls' in chunk['run'] and chunk['run']['tool_calls']:
+                            metadata["tool_calls"].extend(chunk['run']['tool_calls'])
 
                     elif isinstance(chunk, str):
                         # Handle plain string chunks
                         full_response_content += chunk
                         message_placeholder.markdown(full_response_content + " ▌")
+
+                # Try to find tool calls from the complete response (which might have all tools)
+                if complete_response and not metadata["tool_calls"]:
+                    try:
+                        if hasattr(complete_response, 'run') and hasattr(complete_response.run, 'tool_calls') and complete_response.run.tool_calls:
+                            metadata["tool_calls"] = complete_response.run.tool_calls
+                        # Check for tools field in complete response
+                        elif hasattr(complete_response, 'tools') and complete_response.tools:
+                            for tool in complete_response.tools:
+                                if isinstance(tool, dict) and 'tool_name' in tool:
+                                    metadata["tool_calls"].append({"function": {"name": tool['tool_name']}})
+                                elif hasattr(tool, 'tool_name'):
+                                    metadata["tool_calls"].append({"function": {"name": tool.tool_name}})
+                    except Exception as e:
+                        pass
+                
+                # If still no tool calls found but we know Agno uses them, try parsing from full_response_content
+                if not metadata["tool_calls"] and "tool:" in full_response_content.lower():
+                    try:
+                        # This is a simple regex-based fallback to extract tool names
+                        import re
+                        # Find patterns like "Tool: tool_name" or similar in the response
+                        tool_matches = re.findall(r"tool:\s*(\w+)", full_response_content, re.IGNORECASE)
+                        if tool_matches:
+                            # Create simplified tool_call objects with just the function name
+                            for tool_name in tool_matches:
+                                metadata["tool_calls"].append({"function": {"name": tool_name}})
+                    except Exception:
+                        pass
 
                 if not internal_error_message:
                     message_placeholder.markdown(full_response_content)
@@ -154,10 +236,8 @@ def handle_agent_response(agent: Agent, prompt: str, user_id: str, session_id: s
             metadata["error"] = True
             
     # --- Update Session State --- 
-    # <<< Add Debugging >>>
-    print(f"DEBUG: Metadata before appending to session state: {metadata}") 
-    print(f"DEBUG: Tool calls found: {metadata.get('tool_calls')}")
-    # <<< End Debugging >>>
+    # Only log minimal debugging info if needed
+    # print(f"DEBUG: Found {len(metadata.get('tool_calls', []))} tool calls")
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
          st.session_state.messages.append({
              "role": "assistant", "content": full_response_content,"metadata": metadata })
@@ -784,3 +864,77 @@ def handle_memories_section(agent: Agent, memory: Memory):
         
     with memories_tab4:
         display_available_sessions(agent)
+
+def display_knowledge_base(lancedb_uri: str):
+    """Connects to LanceDB URI, lists all tables, and displays their content."""
+    st.header("Knowledge Base Content (LanceDB)")
+
+    if not lancedb_uri:
+        st.error("LanceDB URI not provided.")
+        return
+
+    if not os.path.exists(lancedb_uri):
+        st.warning(f"LanceDB directory not found at: `{lancedb_uri}`")
+        st.info("Please ensure the directory exists. Run `load_knowledge.py` if needed.")
+        return
+
+    try:
+        db = lancedb.connect(lancedb_uri)
+        table_names = db.table_names()
+
+        if not table_names:
+            st.info(f"No tables found in LanceDB directory: `{lancedb_uri}`")
+            return
+
+        st.success(f"Found {len(table_names)} table(s) in `{lancedb_uri}`")
+
+        for table_name in table_names:
+            with st.expander(f"Table: `{table_name}`", expanded=True):
+                try:
+                    with st.spinner(f"Fetching data from table: {table_name}..."):
+                        table = db.open_table(table_name)
+                        df = table.to_pandas()
+                    
+                    if not df.empty:
+                        st.dataframe(df)
+                        # Optionally show raw text in expanders
+                        if 'text' in df.columns:
+                            with st.expander("View Text Snippets", expanded=False):
+                                for index, row in df.iterrows():
+                                    st.text(f"Entry {index}:")
+                                    st.code(row['text'], language=None)
+                                    st.divider()
+                    else:
+                        st.info(f"Table '{table_name}' exists but appears to be empty.")
+
+                except Exception as table_err:
+                    st.error(f"Failed to read or display data from table '{table_name}': {table_err}")
+                    st.code(traceback.format_exc())
+
+    except Exception as e:
+        st.error(f"Failed to connect to or list tables from LanceDB at '{lancedb_uri}': {e}")
+        st.code(traceback.format_exc())
+
+def display_todo_list():
+    """Displays the TODO.md file as a formatted Streamlit component."""
+    st.header("Project TODO List")
+    
+    try:
+        # Read TODO.md file
+        import os
+        todo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "TODO.md")
+        
+        if os.path.exists(todo_path):
+            with open(todo_path, "r") as f:
+                todo_content = f.read()
+                
+            # Display the todo content
+            st.markdown(todo_content)
+            
+            # Add a refresh button
+            if st.button("🔄 Refresh TODO List"):
+                st.rerun()
+        else:
+            st.error(f"TODO.md file not found at {todo_path}")
+    except Exception as e:
+        st.error(f"Error reading TODO.md: {e}")

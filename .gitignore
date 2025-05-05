@@ -20,6 +20,7 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
@@ -49,7 +50,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-cover/
+.cursor/
 
 # Translations
 *.mo
@@ -72,7 +73,6 @@ instance/
 docs/_build/
 
 # PyBuilder
-.pybuilder/
 target/
 
 # Jupyter Notebook
@@ -121,6 +121,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -152,21 +153,17 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# Database files
-*.db
-*.sqlite
-
-# VS Code
+# VSCode
 .vscode/
-*.code-workspace
 
-# PyCharm
-.idea/
-*.iml
+# Cursor specific
+.cursor/
 
-# macOS
-.DS_Store
+# Project specific
+tmp/
+app/__pycache__/
+*.db
+*.db-journal
 
-# Windows
-Thumbs.db
-ehthumbs.db
+# LanceDB data (adjust if URI path changes)
+tmp/lancedb/

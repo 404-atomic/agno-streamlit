@@ -12,6 +12,11 @@ from agno.storage.sqlite import SqliteStorage # Import Storage
 from typing import Tuple, Optional # Import Optional
 from agno.tools.duckduckgo import DuckDuckGoTools # <<< Added Import
 
+# --- Knowledge Imports ---
+from agno.agent import AgentKnowledge
+from agno.vectordb.lancedb import LanceDb
+from agno.vectordb.search import SearchType
+
 # Import the unified key getter
 # from app.config import get_api_key_for_provider
 
@@ -20,6 +25,27 @@ DB_DIR = "tmp"
 DB_FILE = os.path.join(DB_DIR, "agent_memory.db")
 MEMORY_TABLE_NAME = "user_memories_v2"
 STORAGE_TABLE_NAME = "agent_sessions_v2" # New constant for storage table
+
+# --- Knowledge Base Setup ---
+LANCEDB_URI = "tmp/lancedb" # Store LanceDB data locally within the project
+# Default table, not used by the agent in this configuration
+# DEFAULT_KNOWLEDGE_TABLE_NAME = "agent_knowledge_v1"
+RECIPES_TABLE_NAME = "recipes" # Table name from test.py
+
+# Initialize LanceDB Vector DB specifically for the recipes table
+# This is the vector_db the agent will use for knowledge search
+recipes_vector_db = LanceDb(
+    table_name=RECIPES_TABLE_NAME,
+    uri=LANCEDB_URI,
+    # search_type=SearchType.keyword # Optional: Can specify search type
+)
+
+# Initialize the Knowledge Base using the recipes vector_db
+# This knowledge object will be passed to the agent
+recipes_knowledge = AgentKnowledge(
+    vector_db=recipes_vector_db
+)
+# --- End Knowledge Base Setup ---
 
 # --- Model ID Mappings ---
 # Maps provider key (lowercase) to a list of available model IDs
@@ -64,7 +90,7 @@ def initialize_agent(
     load_chat_history: bool,
     description: str = None,
     instructions: list = None
-) -> Tuple[Agent, Memory, SqliteStorage]:
+) -> Tuple[Agent, Memory, SqliteStorage, LanceDb, str]:
     """Initializes agent based on selected settings, using provided API key."""
 
     provider_key = get_provider_key(provider_name)
@@ -133,7 +159,10 @@ def initialize_agent(
         debug_mode=False,
         description=description,
         instructions=instructions,
+        knowledge=recipes_knowledge,      # <<< Use the recipes knowledge base
+        # search_knowledge=True, # This is True by default when knowledge is provided
         tools=[DuckDuckGoTools()],
         show_tool_calls=True,
     )
-    return agent, memory, storage 
+    # Return the LanceDB URI and the vector_db used by the agent
+    return agent, memory, storage, recipes_vector_db, LANCEDB_URI 

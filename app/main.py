@@ -6,7 +6,10 @@ from app.ui import (
     display_user_memories, 
     display_session_storage, 
     display_session_summary,
-    handle_prompts_section
+    handle_prompts_section,
+    display_available_sessions,
+    display_knowledge_base,
+    display_todo_list
 )
 # Import the optional key getter
 from app.config import get_optional_key_from_env
@@ -242,7 +245,8 @@ if not st.session_state.api_key:
 
 # --- Initialize Agent, Memory, and Storage ---
 # Pass the API key and toggle states
-agent, memory, storage = initialize_agent(
+# Unpack the returned LANCEDB_URI as well
+agent, memory, storage, lancedb_vector_db, lancedb_uri = initialize_agent(
     provider_name=st.session_state.selected_provider,
     model_id=st.session_state.selected_model_id,
     api_key=st.session_state.api_key,
@@ -254,7 +258,7 @@ agent, memory, storage = initialize_agent(
 )
 
 # --- Create Main Tabs ---
-tab_chat, tab_prompts, tab_memories = st.tabs(["Chat UI", "Prompts", "Memories"])
+tab_chat, tab_prompts, tab_memories, tab_knowledge, tab_todo = st.tabs(["Chat UI", "Prompts", "Memories", "Knowledge Base", "TODO List"])
 
 # --- Tab 1: Chat UI ---
 with tab_chat:
@@ -282,6 +286,15 @@ with tab_memories:
     with sub_tab_summary:
         # Pass both agent and memory for capability check and triggering
         display_session_summary(agent, memory)
+
+# --- Tab 4: Knowledge Base ---
+with tab_knowledge:
+    # Pass the LanceDB URI instead of the specific table object
+    display_knowledge_base(lancedb_uri)
+
+# --- Tab 5: TODO List ---
+with tab_todo:
+    display_todo_list()
 
 # --- JavaScript Scroll Hack --- 
 # This script attempts to scroll to the bottom after the page rerenders.

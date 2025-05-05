@@ -9,3 +9,5 @@ openai
 googlesearch-python
 sqlalchemy
 duckduckgo-search
+lancedb
+pypdf
