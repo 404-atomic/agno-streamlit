@@ -1,6 +1,6 @@
 import streamlit as st
 from agno.agent import Agent, RunResponse, Message
-from app.prompts import SEQUENTIAL_PROMPTS, EXAMPLE_DESCRIPTIONS, EXAMPLE_INSTRUCTIONS
+from .prompts import SEQUENTIAL_PROMPTS, EXAMPLE_DESCRIPTIONS, EXAMPLE_INSTRUCTIONS
 import json # For pretty printing debug info
 from agno.memory.v2.memory import Memory # Import Memory for type hint
 from agno.storage.sqlite import SqliteStorage # Import Storage

@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from app.models import initialize_agent, AVAILABLE_MODELS, get_provider_key
-from app.ui import (
+from .models import initialize_agent, AVAILABLE_MODELS, get_provider_key
+from .ui import (
     handle_chat_interaction, 
     display_user_memories, 
     display_session_storage, 
@@ -12,7 +12,7 @@ from app.ui import (
     display_todo_list
 )
 # Import the optional key getter
-from app.config import get_optional_key_from_env
+from .config import get_optional_key_from_env
 
 # --- Page Configuration ---
 st.set_page_config(
