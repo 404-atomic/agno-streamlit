@@ -11,3 +11,4 @@ sqlalchemy
 duckduckgo-search
 lancedb
 pypdf
+mcp
